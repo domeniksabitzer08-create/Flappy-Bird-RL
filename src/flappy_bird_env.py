@@ -1,10 +1,10 @@
+import sys
+
 import pygame
 from dataclasses import dataclass
 import math
 
-from pygame.draw import circle
-from pygame.examples.scrap_clipboard import screen
-from sympy.solvers.diophantine.diophantine import prime_as_sum_of_two_squares
+
 
 
 ### VECTOR CLASS ###
@@ -64,30 +64,39 @@ class FlappyBirdEnv:
             self.screen = pygame.display.set_mode((800, 600))
         # start procedure
         self.player = None
-
+        self.obstacles = []
         # Starting the logic
         self.start()
 
     def start(self):
         # starting code
-        self.player = Player(Vector2D(180, 300), Vector2D(0, 10), 1, self)
-        running = True
-        while running:
-            if self.render:
-                running = not self.check_for_closing_game()
-            self.loop()
+        self.player = Player(Vector2D(180, 300), Vector2D(0, -500), 15, self)
+        # init first pipe
+        self.obstacles.append(Obstacle(self.player, Vector2D(400,000),Vector2D(400,400), Vector2D(100,0)))
 
-    def loop(self):
+    def step(self, action: int):
+        self.player.update(action)
         if self.render:
+            self.screen.fill((0,0,0))
             self.player.render(self.screen, self.player_render_color)
+            for obstacle in self.obstacles:
+                obstacle.render(self.screen)
             pygame.display.update()
+        for obstacle in self.obstacles:
+            obstacle.update()
+
 
     @staticmethod
-    def check_for_closing_game() -> bool:
-        """returns True if the window closing button was pressed"""
+    def get_user_input():
+        """returns an action depending on user input and closes the game if quit button was pressed"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return True
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    return 1
+        return 0
 
 class Player:
     def __init__(self, start_pos : Vector2D, up_force : Vector2D, mass: float, env: "FlappyBirdEnv"):
@@ -99,7 +108,7 @@ class Player:
         self.velocity = Vector2D(0, 0)
         self.mass = mass
         # Constants
-        self.gravity_const = 9.81
+        self.gravity_const = 20
         # Collider
         self.collision_radius = 4
         # delta time
@@ -108,14 +117,68 @@ class Player:
         # Rendering
         self.rendering_radius = 40
 
+    def update(self, action: int):
+        force = self.up_force * action
+        self.physics_update(force)
+
+    def physics_update(self, force):
+        self.calculate_delta_time()
+        self.apply_gravity()
+        self.apply_force(force)
+        # update position depending on the velocity
+        self.pos += self.velocity
+
     def apply_gravity(self):
-        self.velocity += self.gravity_const * self.delta_time
+        self.velocity += Vector2D(0,self.gravity_const * self.delta_time)
+
+    def apply_force(self, force: Vector2D):
+        if force != Vector2D(0, 0):
+            self.velocity = force  * self.delta_time
 
     def calculate_delta_time(self):
         self.delta_time = self.clock.tick(self.env.fps)/1000
 
     def render(self, screen: pygame.Surface, color = (255,0,0)):
         pygame.draw.circle(screen, color, (self.pos.x, self.pos.y), self.rendering_radius)
+
+
+class Obstacle:
+    def __init__(self, player: Player ,start_pos_1:Vector2D, start_pos_2:Vector2D, velocity:Vector2D):
+        self.player = player
+        self.pos_1 = start_pos_1
+        self.pos_2 = start_pos_2
+        self.velocity = velocity
+
+        self.pipe_collision_width = 100
+        self.pipe_collision_height = 200
+        self.pipe_1 = pygame.Rect(self.pos_1.x, self.pos_1.y, self.pipe_collision_width, self.pipe_collision_height)
+        self.pipe_2 = pygame.Rect(self.pos_2.x, self.pos_2.y, self.pipe_collision_width, self.pipe_collision_height)
+        # rendering
+        self.color = (0,190,0)
+
+    def update(self):
+        # move
+        self.pos_1 -= self.velocity * self.player.delta_time
+        self.pos_2 -= self.velocity * self.player.delta_time
+        self.pipe_1 = pygame.Rect(self.pos_1.x, self.pos_1.y, self.pipe_collision_width, self.pipe_collision_height)
+        self.pipe_2 = pygame.Rect(self.pos_2.x, self.pos_2.y, self.pipe_collision_width, self.pipe_collision_height)
+
+    def render(self, screen: pygame.Surface):
+        pygame.draw.rect(screen, self.color, self.pipe_1)
+        pygame.draw.rect(screen, self.color, self.pipe_2)
+
+    def check_outside_border(self):
+        """returns true if the pipes are outside the screen"""
+        if self.pos_1.x < 0:
+            return True
+        else:
+            return False
+
+
+
+class Pipe:
+    def __init__(self, start_pos: Vector2D, velocity: Vector2D ):
+        pass
 
 
 
