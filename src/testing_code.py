@@ -11,7 +11,6 @@ def main():
 
     while not is_done:
         action = Env.get_user_input()
-        #print(f"action: {action}")ssssssss
         Env.step(action)
 
 

@@ -57,11 +57,15 @@ class FlappyBirdEnv:
         self.difficulty = difficulty
         self.render = render
         self.fps = 60
+        self.screen_resolution = (450, 800) # 9:16
+        # Game-Design
+        self.max_obs_height = 700
+        self.min_obs_height = 100
         # Rendering
         self.player_render_color = (255,165,0)
         # Assign screen rendering is needed
         if render:
-            self.screen = pygame.display.set_mode((800, 600))
+            self.screen = pygame.display.set_mode(self.screen_resolution)
         # start procedure
         self.player = None
         self.obstacles = []
@@ -81,10 +85,39 @@ class FlappyBirdEnv:
             self.player.render(self.screen, self.player_render_color)
             for obstacle in self.obstacles:
                 obstacle.render(self.screen)
+            react = pygame.Rect(300, 700, 100,100)
+            pygame.draw.rect(self.screen, (0,255,0), react)
             pygame.display.update()
         for obstacle in self.obstacles:
             obstacle.update()
 
+    def spawn_obstacle(self):
+        pass
+
+    def check_for_game_over(self):
+        """return True if the player is dead"""
+        for obstacle in self.obstacles:
+            if self.check_player_collision(self.player, obstacle):
+                return True
+
+    def check_player_collision(self, player: "Player", obstacle: "Obstacle") -> bool:
+        """Return True if player collides with obstacle"""
+        # Find the closest point of the react from the player
+        obj_1 = obstacle.pipe_1
+        obj_2 = obstacle.pipe_2
+        if self.check_circle_react_collision(player, obj_1) or self.check_circle_react_collision(player, obj_2):
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def check_circle_react_collision(player: "Player", pipe: pygame.rect) -> bool:
+        """Return True if player collides with a pipe"""
+        closest_x = max(pipe.left, min(int(player.pos.x), pipe.right))
+        closest_y = max(pipe.bottom, min(int(player.pos.y), pipe.top))
+        # calculate the distance
+        dist = pygame.math.Vector2(player.pos.x, player.pos.y).distance_to((closest_x,closest_y))
+        return dist < player.collision_radius
 
     @staticmethod
     def get_user_input():
@@ -110,12 +143,12 @@ class Player:
         # Constants
         self.gravity_const = 20
         # Collider
-        self.collision_radius = 4
+        self.collision_radius = 30
         # delta time
         self.clock = pygame.time.Clock()
         self.delta_time = 0
         # Rendering
-        self.rendering_radius = 40
+        self.rendering_radius = 30
 
     def update(self, action: int):
         force = self.up_force * action
@@ -176,9 +209,7 @@ class Obstacle:
 
 
 
-class Pipe:
-    def __init__(self, start_pos: Vector2D, velocity: Vector2D ):
-        pass
+
 
 
 
