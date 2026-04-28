@@ -1,3 +1,4 @@
+import random
 import sys
 
 import pygame
@@ -59,8 +60,10 @@ class FlappyBirdEnv:
         self.fps = 60
         self.screen_resolution = (450, 800) # 9:16
         # Game-Design
-        self.max_obs_height = 700
-        self.min_obs_height = 100
+        self.max_obs_height = 100
+        self.min_obs_height = 700
+        self.obstacles_distance = 300
+        self.obstacle_velocity = Vector2D(100, 0)
         # Rendering
         self.player_render_color = (255,165,0)
         # Assign screen rendering is needed
@@ -76,7 +79,7 @@ class FlappyBirdEnv:
         # starting code
         self.player = Player(Vector2D(180, 300), Vector2D(0, -500), 15, self)
         # init first pipe
-        self.obstacles.append(Obstacle(self.player, Vector2D(400,000),Vector2D(400,400), Vector2D(100,0)))
+        self.obstacles.append(Obstacle(self.player, Vector2D(400,000),Vector2D(400,400), self.obstacle_velocity))
 
     def step(self, action: int):
         self.player.update(action)
@@ -85,14 +88,23 @@ class FlappyBirdEnv:
             self.player.render(self.screen, self.player_render_color)
             for obstacle in self.obstacles:
                 obstacle.render(self.screen)
-            react = pygame.Rect(300, 700, 100,100)
-            pygame.draw.rect(self.screen, (0,255,0), react)
             pygame.display.update()
         for obstacle in self.obstacles:
             obstacle.update()
+            # remove obstacle if it is outside the screen
+            if obstacle.check_outside_border():
+                self.obstacles.pop(0)
+
+        # spawn new obstacle
+        self.spawn_obstacle()
 
     def spawn_obstacle(self):
-        pass
+        """spawns an obstacle if necessary"""
+        if len(self.obstacles) < (self.screen_resolution[0] / self.obstacles_distance) +1:
+            height = random.randint(self.max_obs_height,self.min_obs_height)
+            spawn_pos_x = self.obstacles[len(self.obstacles)-1].pos_1.x+ self.obstacles_distance
+            obstacle = Obstacle(self.player, Vector2D(spawn_pos_x ,0), Vector2D(spawn_pos_x ,750), self.obstacle_velocity)
+            self.obstacles.append(obstacle)
 
     def check_for_game_over(self):
         """return True if the player is dead"""
