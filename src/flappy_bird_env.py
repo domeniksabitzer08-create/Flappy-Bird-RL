@@ -60,10 +60,11 @@ class FlappyBirdEnv:
         self.fps = 60
         self.screen_resolution = (450, 800) # 9:16
         # Game-Design
-        self.max_obs_height = 100
-        self.min_obs_height = 700
+        self.max_obs_height = 350
+        self.min_obs_height = self.screen_resolution[1]-100
         self.obstacles_distance = 300
         self.obstacle_velocity = Vector2D(100, 0)
+        self.pipe_height_distance = 300 - (self.difficulty*10)
         # Rendering
         self.player_render_color = (255,165,0)
         # Assign screen rendering is needed
@@ -75,11 +76,16 @@ class FlappyBirdEnv:
         # Starting the logic
         self.start()
 
+    def reset(self):
+        self.player = None
+        self.obstacles = []
+        self.start()
+
     def start(self):
         # starting code
         self.player = Player(Vector2D(180, 300), Vector2D(0, -500), 15, self)
         # init first pipe
-        self.obstacles.append(Obstacle(self.player, Vector2D(400,000),Vector2D(400,400), self.obstacle_velocity))
+        self.obstacles.append(Obstacle(self.player, Vector2D(self.screen_resolution[0]-50, self.screen_resolution[1]/2 + self.pipe_height_distance/2),Vector2D(self.screen_resolution[0]-50, self.screen_resolution[1]/2 - self.screen_resolution[1] - self.pipe_height_distance/2), self.obstacle_velocity))
 
     def step(self, action: int):
         self.player.update(action)
@@ -97,14 +103,20 @@ class FlappyBirdEnv:
 
         # spawn new obstacle
         self.spawn_obstacle()
+        # check for game over
+        if self.check_for_game_over():
+            self.reset()
 
     def spawn_obstacle(self):
         """spawns an obstacle if necessary"""
         if len(self.obstacles) < (self.screen_resolution[0] / self.obstacles_distance) +1:
             height = random.randint(self.max_obs_height,self.min_obs_height)
             spawn_pos_x = self.obstacles[len(self.obstacles)-1].pos_1.x+ self.obstacles_distance
-            obstacle = Obstacle(self.player, Vector2D(spawn_pos_x ,0), Vector2D(spawn_pos_x ,750), self.obstacle_velocity)
+            obstacle = Obstacle(self.player, Vector2D(spawn_pos_x , height), Vector2D(spawn_pos_x , height - self.screen_resolution[1] - self.pipe_height_distance ), self.obstacle_velocity)
             self.obstacles.append(obstacle)
+
+
+
 
     def check_for_game_over(self):
         """return True if the player is dead"""
@@ -123,13 +135,11 @@ class FlappyBirdEnv:
             return False
 
     @staticmethod
-    def check_circle_react_collision(player: "Player", pipe: pygame.rect) -> bool:
+    def check_circle_react_collision( player: "Player", pipe: pygame.rect) -> bool:
         """Return True if player collides with a pipe"""
-        closest_x = max(pipe.left, min(int(player.pos.x), pipe.right))
-        closest_y = max(pipe.bottom, min(int(player.pos.y), pipe.top))
-        # calculate the distance
-        dist = pygame.math.Vector2(player.pos.x, player.pos.y).distance_to((closest_x,closest_y))
-        return dist < player.collision_radius
+        player_rect = pygame.Rect(player.pos.x - player.collision_radius, player.pos.y - player.collision_radius, player.collision_radius*2 , player.collision_radius*2 )
+        is_colliding = player_rect.colliderect(pipe)
+        return is_colliding
 
     @staticmethod
     def get_user_input():
@@ -195,7 +205,7 @@ class Obstacle:
         self.velocity = velocity
 
         self.pipe_collision_width = 100
-        self.pipe_collision_height = 200
+        self.pipe_collision_height = player.env.screen_resolution[1]
         self.pipe_1 = pygame.Rect(self.pos_1.x, self.pos_1.y, self.pipe_collision_width, self.pipe_collision_height)
         self.pipe_2 = pygame.Rect(self.pos_2.x, self.pos_2.y, self.pipe_collision_width, self.pipe_collision_height)
         # rendering
@@ -209,12 +219,12 @@ class Obstacle:
         self.pipe_2 = pygame.Rect(self.pos_2.x, self.pos_2.y, self.pipe_collision_width, self.pipe_collision_height)
 
     def render(self, screen: pygame.Surface):
-        pygame.draw.rect(screen, self.color, self.pipe_1)
+        pygame.draw.rect(screen, (255,0,0), self.pipe_1)
         pygame.draw.rect(screen, self.color, self.pipe_2)
 
     def check_outside_border(self):
         """returns true if the pipes are outside the screen"""
-        if self.pos_1.x < 0:
+        if self.pos_1.x+self.pipe_collision_width < 0:
             return True
         else:
             return False

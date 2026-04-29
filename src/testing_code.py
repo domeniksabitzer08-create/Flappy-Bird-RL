@@ -7,7 +7,7 @@ from flappy_bird_env import *
 def main():
     action = 0
     is_done = False
-    Env = FlappyBirdEnv(1,True)
+    Env = FlappyBirdEnv(4,True)
 
     while not is_done:
         action = Env.get_user_input()
