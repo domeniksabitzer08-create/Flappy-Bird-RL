@@ -115,13 +115,12 @@ class FlappyBirdEnv:
             obstacle = Obstacle(self.player, Vector2D(spawn_pos_x , height), Vector2D(spawn_pos_x , height - self.screen_resolution[1] - self.pipe_height_distance ), self.obstacle_velocity)
             self.obstacles.append(obstacle)
 
-
-
-
     def check_for_game_over(self):
         """return True if the player is dead"""
         for obstacle in self.obstacles:
             if self.check_player_collision(self.player, obstacle):
+                return True
+            if self.check_border_collision(self.player):
                 return True
 
     def check_player_collision(self, player: "Player", obstacle: "Obstacle") -> bool:
@@ -130,6 +129,13 @@ class FlappyBirdEnv:
         obj_1 = obstacle.pipe_1
         obj_2 = obstacle.pipe_2
         if self.check_circle_react_collision(player, obj_1) or self.check_circle_react_collision(player, obj_2):
+            return True
+        else:
+            return False
+
+    def check_border_collision(self, player: "Player") -> bool:
+        """return True if player is outside the screen"""
+        if player.pos.y + player.collision_radius > self.screen_resolution[1] or player.pos.y - player.collision_radius < 0 :
             return True
         else:
             return False
