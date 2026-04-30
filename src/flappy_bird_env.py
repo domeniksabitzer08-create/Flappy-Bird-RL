@@ -73,12 +73,14 @@ class FlappyBirdEnv:
         # start procedure
         self.player = None
         self.obstacles = []
+        self.score = 0
         # Starting the logic
         self.start()
 
     def reset(self):
         self.player = None
         self.obstacles = []
+        self.score = 0
         self.start()
 
     def start(self):
@@ -100,12 +102,15 @@ class FlappyBirdEnv:
             # remove obstacle if it is outside the screen
             if obstacle.check_outside_border():
                 self.obstacles.pop(0)
+            # check if score needs to be added
+            self.manage_score(self.player, obstacle)
 
         # spawn new obstacle
         self.spawn_obstacle()
         # check for game over
         if self.check_for_game_over():
             self.reset()
+
 
     def spawn_obstacle(self):
         """spawns an obstacle if necessary"""
@@ -139,6 +144,12 @@ class FlappyBirdEnv:
             return True
         else:
             return False
+
+    def manage_score(self, player: "Player", obstacle: "Obstacle"):
+        if  obstacle.pipe_collision_width/2 + obstacle.pos_1.x < player.pos.x and not obstacle.applied_score:
+            self.score += 1
+            obstacle.applied_score = True
+            print(f"score: {self.score}")
 
     @staticmethod
     def check_circle_react_collision( player: "Player", pipe: pygame.rect) -> bool:
@@ -214,6 +225,8 @@ class Obstacle:
         self.pipe_collision_height = player.env.screen_resolution[1]
         self.pipe_1 = pygame.Rect(self.pos_1.x, self.pos_1.y, self.pipe_collision_width, self.pipe_collision_height)
         self.pipe_2 = pygame.Rect(self.pos_2.x, self.pos_2.y, self.pipe_collision_width, self.pipe_collision_height)
+        # score
+        self.applied_score = False
         # rendering
         self.color = (0,190,0)
 
