@@ -149,7 +149,6 @@ class FlappyBirdEnv:
         if  obstacle.pipe_collision_width/2 + obstacle.pos_1.x < player.pos.x and not obstacle.applied_score:
             self.score += 1
             obstacle.applied_score = True
-            print(f"score: {self.score}")
 
     @staticmethod
     def check_circle_react_collision( player: "Player", pipe: pygame.rect) -> bool:
@@ -238,7 +237,7 @@ class Obstacle:
         self.pipe_2 = pygame.Rect(self.pos_2.x, self.pos_2.y, self.pipe_collision_width, self.pipe_collision_height)
 
     def render(self, screen: pygame.Surface):
-        pygame.draw.rect(screen, (255,0,0), self.pipe_1)
+        pygame.draw.rect(screen, self.color, self.pipe_1)
         pygame.draw.rect(screen, self.color, self.pipe_2)
 
     def check_outside_border(self):
