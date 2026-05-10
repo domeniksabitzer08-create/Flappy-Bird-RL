@@ -5,7 +5,7 @@ import pygame
 from dataclasses import dataclass
 import math
 
-
+import torch
 
 
 ### VECTOR CLASS ###
@@ -110,9 +110,26 @@ class FlappyBirdEnv:
         # check for game over
         if self.check_for_game_over():
             self.reset()
+        # get state
+        state = self.get_state()
 
     def get_state(self):
-        pass
+        state = torch.zeros((5,2))
+        # obstacles positions
+        if len(self.obstacles) >= 3:
+            for i in range(3):
+                state[i][0] = self.obstacles[i].pos_1.x
+                state[i][1] = self.obstacles[i].pos_1.y
+        # player pos
+        state[3][0] = self.player.pos.x
+        state[3][1] = self.player.pos.y
+        # player velocity
+        state[4][0] = self.player.velocity.x
+        state[4][1] = self.player.velocity.y
+        return state
+
+
+
 
     def spawn_obstacle(self):
         """spawns an obstacle if necessary"""

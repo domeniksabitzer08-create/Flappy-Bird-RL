@@ -27,7 +27,6 @@ class Model(nn.Module):
         x = self.layer_stack(x)
         return x
 
-
 def debug_model_shape():
     dummy = torch.rand((5,2))
     print(f"dummy: {dummy.shape}")
@@ -38,7 +37,6 @@ def debug_model_shape():
     print(f"logit: {y_logit}")
     y_pred = torch.argmax(y_logit, dim=1)
     print(f"action: {y_pred}")
-
 
 if __name__ == '__main__':
     debug_model_shape()
