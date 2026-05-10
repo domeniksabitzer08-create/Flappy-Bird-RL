@@ -111,6 +111,8 @@ class FlappyBirdEnv:
         if self.check_for_game_over():
             self.reset()
 
+    def get_state(self):
+        pass
 
     def spawn_obstacle(self):
         """spawns an obstacle if necessary"""
@@ -130,7 +132,7 @@ class FlappyBirdEnv:
 
     def check_player_collision(self, player: "Player", obstacle: "Obstacle") -> bool:
         """Return True if player collides with obstacle"""
-        # Find the closest point of the react from the player
+        # Find the closest point of the rect from the player
         obj_1 = obstacle.pipe_1
         obj_2 = obstacle.pipe_2
         if self.check_circle_react_collision(player, obj_1) or self.check_circle_react_collision(player, obj_2):
