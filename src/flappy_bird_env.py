@@ -65,6 +65,10 @@ class FlappyBirdEnv:
         self.obstacles_distance = 300
         self.obstacle_velocity = Vector2D(100, 0)
         self.pipe_height_distance = 300 - (self.difficulty*10)
+        # Reward-Design
+        self.death_reward = -1
+        self.score_reward = 1
+        self.reward = 0
         # Rendering
         self.player_render_color = (255,165,0)
         # Assign screen rendering is needed
@@ -82,6 +86,9 @@ class FlappyBirdEnv:
         self.obstacles = []
         self.score = 0
         self.start()
+        state = self.get_state()
+        is_done = False
+        return state, self.reward, is_done, self.score
 
     def start(self):
         # starting code
@@ -104,14 +111,13 @@ class FlappyBirdEnv:
                 self.obstacles.pop(0)
             # check if score needs to be added
             self.manage_score(self.player, obstacle)
-
         # spawn new obstacle
         self.spawn_obstacle()
         # check for game over
-        if self.check_for_game_over():
-            self.reset()
+        is_done = self.check_for_game_over()
         # get state
         state = self.get_state()
+        return state, self.reward, is_done, self.score
 
     def get_state(self):
         state = torch.zeros((5,2))
@@ -128,7 +134,9 @@ class FlappyBirdEnv:
         state[4][1] = self.player.velocity.y
         return state
 
-
+    @staticmethod
+    def sample():
+        return random.randint(0,3)
 
 
     def spawn_obstacle(self):
@@ -143,8 +151,10 @@ class FlappyBirdEnv:
         """return True if the player is dead"""
         for obstacle in self.obstacles:
             if self.check_player_collision(self.player, obstacle):
+                self.reward = self.death_reward
                 return True
             if self.check_border_collision(self.player):
+                self.reward = self.death_reward
                 return True
 
     def check_player_collision(self, player: "Player", obstacle: "Obstacle") -> bool:
