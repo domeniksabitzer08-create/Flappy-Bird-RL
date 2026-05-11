@@ -63,6 +63,9 @@ class Agent:
         self.gamma = gamma
         # environment
         self.env = FlappyBirdEnv(difficulty=4, render=False)
+        # optimizer and loss function
+        self.optimizer = torch.optim.Adam(self.online_net.parameters(), lr=LR)
+        self.loss_fn = torch.nn.MSELoss()
 
     def choose_action(self, state):
         if np.random.random() <= self.epsilon:
@@ -79,29 +82,39 @@ class Agent:
         buffer = ReplayBuffer(10000, 32)
         for episode in tqdm(range(episodes)):
             state, reward, is_done, score = self.env.reset()
+            state = state.flatten() # flatten the state and add extra batch dim
             while not is_done:
                 # choose action
                 action = self.choose_action(state)
                 # execute action
                 next_state, reward, is_done, score = self.env.step(action)
+                next_state = next_state.flatten()
                 # add new experience to buffer
                 buffer.add(state, action, reward, next_state, is_done)
-
+                state = next_state
                 # if enough samples were collected, the optimization can be performed
                 if buffer.can_provide_sample():
+                    # get a batch of experiences
                     batch = buffer.sample()
-                    q_values = self.online_net(batch)
+                    # put each experience part in a single Tensor
+                    state_tensor = torch.stack([e.state for e in batch])
+                    action_tensor = torch.tensor([e.action for e in batch],dtype=torch.long)
+                    reward_tensor = torch.tensor([e.reward for e in batch], dtype=torch.float32)
+                    next_state_tensor = torch.stack([e.next_state for e in batch])
+                    is_done_tensor = torch.tensor([e.is_done for e in batch], dtype=torch.float32)
+                    # add an extra dimension to fit gathering
+                    action_tensor = action_tensor.unsqueeze(1)
+                    # calculate Q-Values
+                    q_values = self.online_net(state_tensor).squeeze(dim=1) # get rid of not necessary dim
+                    q_values = q_values.gather(1, action_tensor).squeeze(dim=1)
+                    # Bellerman equation
                     with torch.no_grad():
-                        q_values_next = self.target_net(next_state)
-                    # Use Bellerman equation
-
-
-
-
-
-
-
-
+                        q_target = reward_tensor + GAMMA * self.target_net(next_state_tensor).max(dim=1,keepdim=True)[0].squeeze(dim=1) * (1 - is_done_tensor)
+                    # training procedure
+                    loss = self.loss_fn(q_values, q_target)
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
 
 
 def debug_model_shape():
@@ -119,7 +132,8 @@ def debug_model_shape():
 
 
 if __name__ == '__main__':
-    debug_model_shape()
+    agent = Agent(0.99, GAMMA)
+    agent.train(10)
 
 
 

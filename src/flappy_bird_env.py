@@ -136,8 +136,7 @@ class FlappyBirdEnv:
 
     @staticmethod
     def sample():
-        return random.randint(0,3)
-
+        return random.randint(0,1)
 
     def spawn_obstacle(self):
         """spawns an obstacle if necessary"""
@@ -149,6 +148,7 @@ class FlappyBirdEnv:
 
     def check_for_game_over(self):
         """return True if the player is dead"""
+        """return True if the player is dead"""
         for obstacle in self.obstacles:
             if self.check_player_collision(self.player, obstacle):
                 self.reward = self.death_reward
@@ -156,6 +156,7 @@ class FlappyBirdEnv:
             if self.check_border_collision(self.player):
                 self.reward = self.death_reward
                 return True
+        return False
 
     def check_player_collision(self, player: "Player", obstacle: "Obstacle") -> bool:
         """Return True if player collides with obstacle"""
