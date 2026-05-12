@@ -1,6 +1,6 @@
 import random
 import sys
-
+import time
 import pygame
 from dataclasses import dataclass
 import math
@@ -64,10 +64,11 @@ class FlappyBirdEnv:
         self.min_obs_height = self.screen_resolution[1]-100
         self.obstacles_distance = 300
         self.obstacle_velocity = Vector2D(100, 0)
-        self.pipe_height_distance = 300 - (self.difficulty*10)
+        self.pipe_height_distance = 500 - (self.difficulty*10)
         # Reward-Design
-        self.death_reward = -1
-        self.score_reward = 1
+        self.death_reward = -3
+        self.score_reward = 3
+        self.nothing_reward = 0.001
         self.reward = 0
         # Rendering
         self.player_render_color = (255,165,0)
@@ -97,6 +98,9 @@ class FlappyBirdEnv:
         self.obstacles.append(Obstacle(self.player, Vector2D(self.screen_resolution[0]-50, self.screen_resolution[1]/2 + self.pipe_height_distance/2),Vector2D(self.screen_resolution[0]-50, self.screen_resolution[1]/2 - self.screen_resolution[1] - self.pipe_height_distance/2), self.obstacle_velocity))
 
     def step(self, action: int):
+        self.reward = self.nothing_reward
+        if self.render:
+            self.get_user_input()
         self.player.update(action)
         if self.render:
             self.screen.fill((0,0,0))
@@ -121,14 +125,14 @@ class FlappyBirdEnv:
 
     def get_state(self):
         state = torch.zeros((5,2))
-        # obstacles positions
+        # obstacles positions relative to player
         if len(self.obstacles) >= 3:
             for i in range(3):
-                state[i][0] = self.obstacles[i].pos_1.x
-                state[i][1] = self.obstacles[i].pos_1.y
+                state[i][0] = (self.player.pos.x - self.obstacles[i].pos_1.x) / self.screen_resolution[0]
+                state[i][1] = self.obstacles[i].pos_1.y / self.screen_resolution[0]
         # player pos
-        state[3][0] = self.player.pos.x
-        state[3][1] = self.player.pos.y
+        state[3][0] = self.player.pos.x / self.screen_resolution[0]
+        state[3][1] = self.player.pos.y  / self.screen_resolution[0]
         # player velocity
         state[4][0] = self.player.velocity.x
         state[4][1] = self.player.velocity.y
@@ -153,10 +157,11 @@ class FlappyBirdEnv:
             if self.check_player_collision(self.player, obstacle):
                 self.reward = self.death_reward
                 return True
-            if self.check_border_collision(self.player):
-                self.reward = self.death_reward
-                return True
-        return False
+        if self.check_border_collision(self.player):
+            self.reward = self.death_reward
+            return True
+        else:
+            return False
 
     def check_player_collision(self, player: "Player", obstacle: "Obstacle") -> bool:
         """Return True if player collides with obstacle"""
@@ -178,6 +183,7 @@ class FlappyBirdEnv:
     def manage_score(self, player: "Player", obstacle: "Obstacle"):
         if  obstacle.pipe_collision_width/2 + obstacle.pos_1.x < player.pos.x and not obstacle.applied_score:
             self.score += 1
+            self.reward = self.score_reward
             obstacle.applied_score = True
 
     @staticmethod
@@ -237,7 +243,10 @@ class Player:
             self.velocity = force  * self.delta_time
 
     def calculate_delta_time(self):
-        self.delta_time = self.clock.tick(self.env.fps)/1000
+        if self.env.render:
+            self.delta_time = self.clock.tick(self.env.fps)/1000
+        else:
+            self.delta_time = 1 / self.env.fps
 
     def render(self, screen: pygame.Surface, color = (255,0,0)):
         pygame.draw.circle(screen, color, (self.pos.x, self.pos.y), self.rendering_radius)

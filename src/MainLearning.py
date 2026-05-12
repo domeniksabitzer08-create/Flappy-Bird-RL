@@ -4,17 +4,20 @@ from collections import deque, namedtuple
 
 import numpy as np
 from tqdm.auto import tqdm
-
+import time
 from flappy_bird_env import *
 # Torch
 import torch
 from torch import nn
 
 ### -------- SETUP -------- ###
-LR = 0.01
-GAMMA = 0.9
-GAMMA_DECAY = 0.99
-
+LR = 0.001
+GAMMA = 0.99
+EPSILON = 1
+EPSILON_MIN = 0.01
+EPSILON_DECAY = 0.99
+EPISODES = 500
+DIFFICULTY = 1
 
 class DQN(nn.Module):
     def __init__(self, input_features: int, output_features: int, hidden_units: int = 64):
@@ -54,18 +57,24 @@ class ReplayBuffer:
 
 
 class Agent:
-    def __init__(self, epsilon, gamma):
+    def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min):
         # networks
         self.online_net = DQN(input_features=10, output_features=2)
         self.target_net = copy.deepcopy(self.online_net)
+        self.network_sync_rate = 1000
         # Hyperparameter
         self.epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.epsilon_min = epsilon_min
         self.gamma = gamma
         # environment
-        self.env = FlappyBirdEnv(difficulty=4, render=False)
+        self.env = FlappyBirdEnv(difficulty=DIFFICULTY, render=False)
+        self.test_env = FlappyBirdEnv(difficulty=DIFFICULTY, render=True)
         # optimizer and loss function
         self.optimizer = torch.optim.Adam(self.online_net.parameters(), lr=LR)
         self.loss_fn = torch.nn.MSELoss()
+        # data management
+        self.train_score = 0
 
     def choose_action(self, state):
         if np.random.random() <= self.epsilon:
@@ -80,14 +89,21 @@ class Agent:
 
     def train(self, episodes: int):
         buffer = ReplayBuffer(10000, 32)
+        step_count = 0
         for episode in tqdm(range(episodes)):
-            state, reward, is_done, score = self.env.reset()
+            ### DATA ###
+            episode_reward = 0
+            state, reward, is_done, episode_score = self.env.reset()
             state = state.flatten() # flatten the state and add extra batch dim
             while not is_done:
-                # choose action
-                action = self.choose_action(state)
+                step_count += 1
+                # choose action every 5 steps
+                if step_count % 5 == 0:
+                    action = self.choose_action(state)
+                else:
+                    action = 0
                 # execute action
-                next_state, reward, is_done, score = self.env.step(action)
+                next_state, reward, is_done, episode_score = self.env.step(action)
                 next_state = next_state.flatten()
                 # add new experience to buffer
                 buffer.add(state, action, reward, next_state, is_done)
@@ -109,13 +125,42 @@ class Agent:
                     q_values = q_values.gather(1, action_tensor).squeeze(dim=1)
                     # Bellerman equation
                     with torch.no_grad():
-                        q_target = reward_tensor + GAMMA * self.target_net(next_state_tensor).max(dim=1,keepdim=True)[0].squeeze(dim=1) * (1 - is_done_tensor)
+                        q_target = reward_tensor + self.gamma * self.target_net(next_state_tensor).max(dim=1,keepdim=True)[0].squeeze(dim=1) * (1 - is_done_tensor)
                     # training procedure
                     loss = self.loss_fn(q_values, q_target)
                     self.optimizer.zero_grad()
                     loss.backward()
                     self.optimizer.step()
+                    ### UPDATE DATA ###
+                    episode_score += episode_score
+                    episode_reward += reward
 
+                    # sync networks
+                    if step_count % self.network_sync_rate == 0:
+                        self.sync_target()
+
+            # Epsilon decay
+            self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
+            ### ---- DATA ---- ###
+            # save the score
+            self.train_score += episode_score
+            try:
+                avg_score = self.train_score / episode
+            except ZeroDivisionError:
+                avg_score = episode_score
+            # Print out every 100 episode
+            if episode % 100 == 0:
+                print(f"Episode: {episode} | avg_score: {avg_score:.2f} | total_score: {self.train_score} | Epsilon: {self.epsilon} | episode reward: {episode_reward}")
+
+    def test(self, episodes: int):
+        for episodes in tqdm(range(episodes)):
+            state, reward, is_done, score = self.test_env.reset()
+            state = state.flatten()
+            while not is_done:
+                action = torch.argmax(self.online_net(state)).item()
+                next_state, reward, is_done, score = self.test_env.step(action)
+                next_state = next_state.flatten()
+                state = next_state
 
 def debug_model_shape():
     dummy = torch.rand((5,2))
@@ -128,12 +173,20 @@ def debug_model_shape():
     y_pred = torch.argmax(y_logit, dim=1)
     print(f"action: {y_pred}")
 
-
+def messure_env_time():
+    env = FlappyBirdEnv(difficulty=4, render=False)
+    state, _, _, _ = env.reset()
+    start = time.time()
+    for _ in range(100):
+        action = env.sample()
+        env.step(action)
+    print(time.time() - start)
 
 
 if __name__ == '__main__':
-    agent = Agent(0.99, GAMMA)
-    agent.train(10)
+    agent = Agent(EPSILON, GAMMA, EPSILON_DECAY, EPSILON_MIN)
+    agent.train(EPISODES)
+    agent.test(100)
 
 
 
