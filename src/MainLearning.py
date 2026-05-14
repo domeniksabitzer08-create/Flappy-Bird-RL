@@ -1,27 +1,41 @@
 # Environment
 import copy
 from collections import deque, namedtuple
+from os import mkdir
 
 import numpy as np
 from tqdm.auto import tqdm
 import time
+import os
+from pathlib import Path
 from flappy_bird_env import *
 # Torch
 import torch
 from torch import nn
 
-### -------- SETUP -------- ###
-LR = 0.001
+### ---------------- SETUP ---------------- ###
+# -> TRAINING/TESTING SETTINGS
+USE_EXISTING_MODEL = True
+MODEL_NAME = "DQN_64_V_10"
+TRAINING = True
+# -> HYPERPARAMETER
+LR = 0.00005
 GAMMA = 0.99
-EPSILON = 1
-EPSILON_MIN = 0.01
-EPSILON_DECAY = 0.9995
-EPISODES = 3000
+EPSILON = 0.1
+EPSILON_MIN = 0.05
+EPSILON_DECAY = 0.9999
+EPISODES = 5000
+TEST_EPISODES = 30
 DIFFICULTY = 20
+### -------- PATH SETTINGS -------- ###
+BASE_DIR = Path(__file__).resolve().parent.parent
+MODEL_DIR = BASE_DIR / "models"
+
 
 class DQN(nn.Module):
     def __init__(self, input_features: int, output_features: int, hidden_units: int = 64):
         super(DQN, self).__init__()
+        self.hidden_units = hidden_units
         self.layer_stack = nn.Sequential(
             nn.Linear(input_features, hidden_units),
             nn.ReLU(),
@@ -29,7 +43,6 @@ class DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_units, output_features),
         )
-
     def forward(self, x):
         x = self.layer_stack(x)
         return x
@@ -57,9 +70,14 @@ class ReplayBuffer:
 
 
 class Agent:
-    def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min):
-        # networks
-        self.online_net = DQN(input_features=10, output_features=2)
+    def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min, use_existing_model=False, model_name=None ):
+        # networks - use existing or create new
+        if use_existing_model:
+            online_net = self.load_model(model_name)
+        else:
+            online_net = DQN(input_features=10, output_features=2)
+
+        self.online_net = online_net
         self.target_net = copy.deepcopy(self.online_net)
         self.network_sync_rate = 1000
         # Hyperparameter
@@ -92,6 +110,7 @@ class Agent:
     def train(self, episodes: int):
         buffer = ReplayBuffer(10000, 32)
         step_count = 0
+        sprint_score = 0
         for episode in tqdm(range(episodes)):
             ### Data ###
             episode_reward = 0
@@ -142,28 +161,60 @@ class Agent:
             ### ---- DATA ---- ###
             # save the score and reward
             self.train_score += episode_score
+            sprint_score += episode_score
             self.train_reward += episode_reward
             try:
                 avg_score = self.train_score / episode
                 avg_reward = self.train_reward / episode
                 avg_steps = step_count / episode
+                avg_sprint_score = sprint_score / 100
             except ZeroDivisionError:
                 avg_score = episode_score
                 avg_reward = episode_reward
                 avg_steps = step_count / 1
+                avg_sprint_score = 0
             # Print out every 100 episode
-            if episode % 100 == 0:
-                print(f"Episode: {episode} | avg_score: {avg_score:.2f} | total_score: {self.train_score}  | avg reward: {avg_reward} | avg steps: {avg_steps}")
+            if episode % 100 == 0 and episode != 0:
+                print(f"\nEpisode: {episode} | avg sprint score: {avg_sprint_score:.2f} | avg reward: {avg_reward:.3f} | avg steps: {avg_steps:.3f}  | Epsilon: {self.epsilon:.4f}")
+                sprint_score = 0
+        print("Training Complete!")
+        self.save_model()
+
     def test(self, episodes: int):
-        for episodes in tqdm(range(episodes)):
-            state, reward, is_done, score = self.test_env.reset()
+        total_score = 0
+        env = self.env
+        for episode in tqdm(range(episodes)):
+            state, reward, is_done, episode_score = env.reset()
             state = state.flatten()
             while not is_done:
                 action = torch.argmax(self.online_net(state)).item()
-                next_state, reward, is_done, score = self.test_env.step(action)
+                next_state, reward, is_done, episode_score = env.step(action)
                 next_state = next_state.flatten()
                 state = next_state
+            if episode == (episodes -10):
+                avg_score = total_score / episodes
+                print(f"test result (avg score): {avg_score:.3f}")
+                env = self.test_env
+            total_score += episode_score
 
+    ### SAVING AND LOADING MODEL ###
+    def save_model(self):
+        name = f"{self.online_net.__class__.__name__}_{self.online_net.hidden_units}_V_{len(os.listdir(MODEL_DIR))}"
+        torch.save(self.online_net, fr"{MODEL_DIR}\{name}.pth")
+        print(f"saved model under name: {name}")
+        return fr"{MODEL_DIR}\{name}.pth"
+
+    @staticmethod
+    def load_model(model_name: str):
+        base_path = MODEL_DIR
+        model_name = fr"{base_path}\{model_name}.pth"
+        try:
+            model = torch.load(model_name, weights_only=False)
+            print(f"model {model_name}.pth was loaded")
+            return model
+        except FileNotFoundError:
+            print(f"{model_name} was not found!")
+            raise FileNotFoundError
 
 
 def debug_model_shape():
@@ -188,9 +239,10 @@ def messure_env_time():
 
 
 if __name__ == '__main__':
-    agent = Agent(EPSILON, GAMMA, EPSILON_DECAY, EPSILON_MIN)
-    agent.train(EPISODES)
-    agent.test(100)
+    agent = Agent(EPSILON, GAMMA, EPSILON_DECAY, EPSILON_MIN, USE_EXISTING_MODEL, MODEL_NAME)
+    if TRAINING:
+        agent.train(EPISODES)
+    agent.test(TEST_EPISODES)
 
 
 

@@ -93,7 +93,9 @@ class FlappyBirdEnv:
 
     def start(self):
         # starting code
-        self.player = Player(Vector2D(180, self.screen_resolution[1]/2), Vector2D(0, -500), 15, self)
+        # spawn player at rnd pos
+        rnd_pos = random.randint(int(30*1.5),self.screen_resolution[1] - int(30*1.5))
+        self.player = Player(Vector2D(180, rnd_pos), Vector2D(0, -500), 15, self)
         # init first pipe
         # spawn obstacle in the middle
         #self.obstacles.append(Obstacle(self.player, Vector2D(self.screen_resolution[0]-50, self.screen_resolution[1]/2 + self.pipe_height_distance/2),Vector2D(self.screen_resolution[0]-50, self.screen_resolution[1]/2 - self.screen_resolution[1] - self.pipe_height_distance/2), self.obstacle_velocity))
@@ -155,7 +157,7 @@ class FlappyBirdEnv:
             if len(self.obstacles) != 0:
                 spawn_pos_x = self.obstacles[len(self.obstacles)-1].pos_1.x+ self.obstacles_distance
             else:
-                spawn_pos_x = self.screen_resolution[0]/2 + self.screen_resolution[0]/4
+                spawn_pos_x =  self.obstacles_distance
             obstacle = Obstacle(self.player, Vector2D(spawn_pos_x , height), Vector2D(spawn_pos_x , height - self.screen_resolution[1] - self.pipe_height_distance ), self.obstacle_velocity)
             self.obstacles.append(obstacle)
 
@@ -219,6 +221,7 @@ class Player:
         # Environment
         self.env = env
         # Pos Force and Velocity
+        self.start_pos = start_pos
         self.pos = start_pos
         self.up_force = up_force
         self.velocity = Vector2D(0, 0)
