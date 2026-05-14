@@ -15,9 +15,9 @@ LR = 0.001
 GAMMA = 0.99
 EPSILON = 1
 EPSILON_MIN = 0.01
-EPSILON_DECAY = 0.99
-EPISODES = 500
-DIFFICULTY = 1
+EPSILON_DECAY = 0.9995
+EPISODES = 3000
+DIFFICULTY = 20
 
 class DQN(nn.Module):
     def __init__(self, input_features: int, output_features: int, hidden_units: int = 64):
@@ -75,6 +75,8 @@ class Agent:
         self.loss_fn = torch.nn.MSELoss()
         # data management
         self.train_score = 0
+        self.train_reward = 0
+        self.train_steps = 0
 
     def choose_action(self, state):
         if np.random.random() <= self.epsilon:
@@ -91,17 +93,14 @@ class Agent:
         buffer = ReplayBuffer(10000, 32)
         step_count = 0
         for episode in tqdm(range(episodes)):
-            ### DATA ###
+            ### Data ###
             episode_reward = 0
             state, reward, is_done, episode_score = self.env.reset()
             state = state.flatten() # flatten the state and add extra batch dim
             while not is_done:
                 step_count += 1
-                # choose action every 5 steps
-                if step_count % 5 == 0:
-                    action = self.choose_action(state)
-                else:
-                    action = 0
+                # choose action
+                action = self.choose_action(state)
                 # execute action
                 next_state, reward, is_done, episode_score = self.env.step(action)
                 next_state = next_state.flatten()
@@ -132,7 +131,6 @@ class Agent:
                     loss.backward()
                     self.optimizer.step()
                     ### UPDATE DATA ###
-                    episode_score += episode_score
                     episode_reward += reward
 
                     # sync networks
@@ -142,16 +140,20 @@ class Agent:
             # Epsilon decay
             self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
             ### ---- DATA ---- ###
-            # save the score
+            # save the score and reward
             self.train_score += episode_score
+            self.train_reward += episode_reward
             try:
                 avg_score = self.train_score / episode
+                avg_reward = self.train_reward / episode
+                avg_steps = step_count / episode
             except ZeroDivisionError:
                 avg_score = episode_score
+                avg_reward = episode_reward
+                avg_steps = step_count / 1
             # Print out every 100 episode
             if episode % 100 == 0:
-                print(f"Episode: {episode} | avg_score: {avg_score:.2f} | total_score: {self.train_score} | Epsilon: {self.epsilon} | episode reward: {episode_reward}")
-
+                print(f"Episode: {episode} | avg_score: {avg_score:.2f} | total_score: {self.train_score}  | avg reward: {avg_reward} | avg steps: {avg_steps}")
     def test(self, episodes: int):
         for episodes in tqdm(range(episodes)):
             state, reward, is_done, score = self.test_env.reset()
@@ -161,6 +163,8 @@ class Agent:
                 next_state, reward, is_done, score = self.test_env.step(action)
                 next_state = next_state.flatten()
                 state = next_state
+
+
 
 def debug_model_shape():
     dummy = torch.rand((5,2))
