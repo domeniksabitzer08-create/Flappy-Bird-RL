@@ -1,12 +1,10 @@
 # Environment
 import copy
 from collections import deque, namedtuple
-from operator import truediv
-from os import mkdir
+
 
 import numpy as np
-from torch.export.pt2_archive.constants import MODELS_DIR
-from torchgen.api.cpp import return_names
+
 from tqdm.auto import tqdm
 import time
 import os
@@ -26,7 +24,7 @@ def naming():
 ### ---------------- SETUP ---------------- ###
 # -> TRAINING/TESTING SETTINGS
 USE_EXISTING_MODEL = True
-MODEL_VERSION = 32
+MODEL_VERSION = 0
 MODEL_NAME = f"DQN_64_V_{MODEL_VERSION}"
 TRAINING = True
 # -> HYPERPARAMETER
@@ -35,19 +33,18 @@ GAMMA = 0.99
 EPSILON = 0.01
 EPSILON_MIN = 0.01
 EPSILON_DECAY = 0.99907
-EPISODES = 1000
+EPISODES = 10
 TEST_EPISODES = 110
 DIFFICULTY = 25
+### -------- PATH SETTINGS -------- ###
+BASE_DIR = Path(__file__).resolve().parent.parent / "Experiments"
 # -> NAMING
 if not USE_EXISTING_MODEL:
-    MODEL_VERSION = len(os.listdir(MODELS_DIR))
-### -------- PATH SETTINGS -------- ###
-BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL_DIR = BASE_DIR / "models"
-BUFFER_DIR = BASE_DIR / "buffers"
-RUNS_DIR = BASE_DIR / "runs"
-EXP_PATH = BASE_DIR / fr"experiments"
+    MODEL_VERSION = len(os.listdir(BASE_DIR))
+# -> Create new folder for run
+EXP_DIR = BASE_DIR / f"V_{MODEL_VERSION}"
 
+os.makedirs(EXP_DIR, exist_ok=True)
 
 
 class DQN(nn.Module):
@@ -66,7 +63,7 @@ class DQN(nn.Module):
         return x
 
 # Assigning Experience outside the class so pickle can access it
-EXPERIENCE = namedtuple("Experience", ["state", "action", "reward", "next_state", "is_done"])
+Experience = namedtuple("Experience", ["state", "action", "reward", "next_state", "is_done"])
 class ReplayBuffer:
     def __init__(self, capacity: int, batch_size: int):
         self.capacity = capacity
@@ -74,7 +71,7 @@ class ReplayBuffer:
         self.memory = deque(maxlen=capacity)
 
     def add(self, state, action, reward, next_state, is_done):
-        experience = EXPERIENCE(state, action, reward, next_state, is_done)
+        experience = Experience(state, action, reward, next_state, is_done)
         self.memory.append(experience)
 
     def sample(self):
@@ -88,24 +85,31 @@ class ReplayBuffer:
         return len(self.memory)
 
 def save_buffer(buffer: ReplayBuffer):
-    path = BUFFER_DIR / f"_V_{len(os.listdir(MODEL_DIR))}_buffer.pkl"
+    path = EXP_DIR / f"_V_{MODEL_VERSION}_buffer.pkl"
     with open(path, "wb") as f:
         dill.dump(buffer.memory, f)
-    print("saved buffer")
-
 
 class Agent:
     def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min, use_existing_model=False, model_name=None, model_version=None):
         # networks and buffer - use existing or create new
         self.buffer = ReplayBuffer(10000, 32)
-        if use_existing_model:
-            online_net = self.load_model(model_name)
-            self.buffer.memory = self.load_buffer(model_version=model_version)
-        else:
-            online_net = DQN(input_features=10, output_features=2)
+        #online_net = self.load_model(model_name)
+        #self.buffer.memory = self.load_buffer(model_version=model_version)
+        online_net = DQN(input_features=10, output_features=2)
         self.online_net = online_net
         self.target_net = copy.deepcopy(self.online_net)
         self.network_sync_rate = 1000
+        # optimizer and loss function
+        self.optimizer = torch.optim.Adam(self.online_net.parameters(), lr=LR)
+        self.loss_fn = torch.nn.MSELoss()
+        # Load values and states if needed
+        if USE_EXISTING_MODEL:
+            checkpoint = load_checkpoint()
+            print(f"checkpoint: {checkpoint} ")
+            # model
+            #self.online_net.load_state_dict()
+            # optimizer
+            #self.optimizer.load_state_dict(online_net.optimizer.state_dict())
         # Hyperparameter
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
@@ -114,14 +118,12 @@ class Agent:
         # environment
         self.env = FlappyBirdEnv(difficulty=DIFFICULTY, render=False)
         self.test_env = FlappyBirdEnv(difficulty=DIFFICULTY, render=True)
-        # optimizer and loss function
-        self.optimizer = torch.optim.Adam(self.online_net.parameters(), lr=LR)
-        self.loss_fn = torch.nn.MSELoss()
         # data management
         self.train_score = 0
         self.train_reward = 0
         self.train_steps = 0
         self.highest_score = 0
+        self.global_steps = 0
 
     def choose_action(self, state):
         if np.random.random() <= self.epsilon:
@@ -145,6 +147,7 @@ class Agent:
             state = state.flatten() # flatten the state and add extra batch dim
             while not is_done:
                 step_count += 1
+                self.global_steps += 1
                 # choose action
                 action = self.choose_action(state)
                 # execute action
@@ -209,13 +212,9 @@ class Agent:
                 # save the model if it is the best performing one
                 if self.highest_score < avg_sprint_score:
                     self.highest_score = avg_sprint_score
-                    self.save_model()
-                    save_buffer(buffer)
 
         print("Training Complete!")
-        self.buffer = buffer
-        self.save_model()
-        save_buffer(buffer)
+        save_state(self.online_net, self.optimizer, self.buffer, self.global_steps)
 
     def test(self, episodes: int):
         total_score = 0
@@ -234,36 +233,24 @@ class Agent:
                 env = self.test_env
             total_score += episode_score
 
-    ### SAVING AND LOADING MODEL AND BUFFER ###
-    def save_state(self):
-        pass
+### SAVING AND LOADING MODEL AND BUFFER ###
+def save_state(model: torch.nn.Module, optimizer: torch.optim.Optimizer, buffer: ReplayBuffer, global_steps: int):
+    checkpoint ={
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "buffer_memory": buffer.memory,
+        "global_steps": global_steps
+    }
+    torch.save(checkpoint, EXP_DIR/f"V_{MODEL_VERSION}.pt")
+    print(f"saved checkpoint: at location: {EXP_DIR/f"V_{MODEL_VERSION}.pt"}")
 
 
-    def save_model(self):
-        name = f"{self.online_net.__class__.__name__}_{self.online_net.hidden_units}_V_{len(os.listdir(MODEL_DIR))}"
-        torch.save(self.online_net, fr"{MODEL_DIR}\{name}.pth")
-        print(f"saved model under name: {name}")
-        return fr"{MODEL_DIR}\{name}.pth"
+def load_checkpoint():
+    path = EXP_DIR / f"V_{MODEL_VERSION}.pt"
+    checkpoint = torch.load(path, weights_only=False)
+    print("loaded checkpoint!")
+    return checkpoint
 
-    @staticmethod
-    def load_model(model_name: str):
-        base_path = MODEL_DIR
-        model_name = fr"{base_path}\{model_name}.pth"
-        try:
-            model = torch.load(model_name, weights_only=False)
-            print(f"model {model_name} was loaded")
-            return model
-        except FileNotFoundError:
-            print(f"{model_name} was not found!")
-            raise FileNotFoundError
-
-    @staticmethod
-    def load_buffer(model_version: int):
-        path = BUFFER_DIR / f"_V_{model_version}_buffer.pkl"
-        with open(path, "rb") as f:
-             x = dill.load(f)
-        print("loaded buffer")
-        return x
 
 
 
