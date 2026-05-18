@@ -1,35 +1,53 @@
 # Environment
 import copy
 from collections import deque, namedtuple
+from operator import truediv
 from os import mkdir
 
 import numpy as np
+from torch.export.pt2_archive.constants import MODELS_DIR
+from torchgen.api.cpp import return_names
 from tqdm.auto import tqdm
 import time
 import os
+import dill
 from pathlib import Path
 from flappy_bird_env import *
 # Torch
 import torch
 from torch import nn
-
+# Tensorboard
+from torch.utils.tensorboard import SummaryWriter
+def naming():
+    if TRAINING:
+        if USE_EXISTING_MODEL:
+            v = MODEL_VERSION
+            retrain = "RETRAINED"
 ### ---------------- SETUP ---------------- ###
 # -> TRAINING/TESTING SETTINGS
 USE_EXISTING_MODEL = True
-MODEL_NAME = "DQN_64_V_10"
+MODEL_VERSION = 32
+MODEL_NAME = f"DQN_64_V_{MODEL_VERSION}"
 TRAINING = True
 # -> HYPERPARAMETER
-LR = 0.00005
+LR = 0.001
 GAMMA = 0.99
-EPSILON = 0.1
-EPSILON_MIN = 0.05
-EPSILON_DECAY = 0.9999
-EPISODES = 5000
-TEST_EPISODES = 30
-DIFFICULTY = 20
+EPSILON = 0.01
+EPSILON_MIN = 0.01
+EPSILON_DECAY = 0.99907
+EPISODES = 1000
+TEST_EPISODES = 110
+DIFFICULTY = 25
+# -> NAMING
+if not USE_EXISTING_MODEL:
+    MODEL_VERSION = len(os.listdir(MODELS_DIR))
 ### -------- PATH SETTINGS -------- ###
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE_DIR / "models"
+BUFFER_DIR = BASE_DIR / "buffers"
+RUNS_DIR = BASE_DIR / "runs"
+EXP_PATH = BASE_DIR / fr"experiments"
+
 
 
 class DQN(nn.Module):
@@ -47,15 +65,16 @@ class DQN(nn.Module):
         x = self.layer_stack(x)
         return x
 
+# Assigning Experience outside the class so pickle can access it
+EXPERIENCE = namedtuple("Experience", ["state", "action", "reward", "next_state", "is_done"])
 class ReplayBuffer:
     def __init__(self, capacity: int, batch_size: int):
         self.capacity = capacity
         self.batch_size = batch_size
         self.memory = deque(maxlen=capacity)
-        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "is_done"])
 
     def add(self, state, action, reward, next_state, is_done):
-        experience = self.experience(state, action, reward, next_state, is_done)
+        experience = EXPERIENCE(state, action, reward, next_state, is_done)
         self.memory.append(experience)
 
     def sample(self):
@@ -68,15 +87,22 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.memory)
 
+def save_buffer(buffer: ReplayBuffer):
+    path = BUFFER_DIR / f"_V_{len(os.listdir(MODEL_DIR))}_buffer.pkl"
+    with open(path, "wb") as f:
+        dill.dump(buffer.memory, f)
+    print("saved buffer")
+
 
 class Agent:
-    def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min, use_existing_model=False, model_name=None ):
-        # networks - use existing or create new
+    def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min, use_existing_model=False, model_name=None, model_version=None):
+        # networks and buffer - use existing or create new
+        self.buffer = ReplayBuffer(10000, 32)
         if use_existing_model:
             online_net = self.load_model(model_name)
+            self.buffer.memory = self.load_buffer(model_version=model_version)
         else:
             online_net = DQN(input_features=10, output_features=2)
-
         self.online_net = online_net
         self.target_net = copy.deepcopy(self.online_net)
         self.network_sync_rate = 1000
@@ -95,6 +121,7 @@ class Agent:
         self.train_score = 0
         self.train_reward = 0
         self.train_steps = 0
+        self.highest_score = 0
 
     def choose_action(self, state):
         if np.random.random() <= self.epsilon:
@@ -108,7 +135,7 @@ class Agent:
         self.target_net.load_state_dict(self.online_net.state_dict())
 
     def train(self, episodes: int):
-        buffer = ReplayBuffer(10000, 32)
+        buffer = self.buffer
         step_count = 0
         sprint_score = 0
         for episode in tqdm(range(episodes)):
@@ -173,12 +200,22 @@ class Agent:
                 avg_reward = episode_reward
                 avg_steps = step_count / 1
                 avg_sprint_score = 0
-            # Print out every 100 episode
+
+
+            # Print out every 1000 episode
             if episode % 100 == 0 and episode != 0:
                 print(f"\nEpisode: {episode} | avg sprint score: {avg_sprint_score:.2f} | avg reward: {avg_reward:.3f} | avg steps: {avg_steps:.3f}  | Epsilon: {self.epsilon:.4f}")
                 sprint_score = 0
+                # save the model if it is the best performing one
+                if self.highest_score < avg_sprint_score:
+                    self.highest_score = avg_sprint_score
+                    self.save_model()
+                    save_buffer(buffer)
+
         print("Training Complete!")
+        self.buffer = buffer
         self.save_model()
+        save_buffer(buffer)
 
     def test(self, episodes: int):
         total_score = 0
@@ -192,12 +229,16 @@ class Agent:
                 next_state = next_state.flatten()
                 state = next_state
             if episode == (episodes -10):
-                avg_score = total_score / episodes
+                avg_score = total_score / episode
                 print(f"test result (avg score): {avg_score:.3f}")
                 env = self.test_env
             total_score += episode_score
 
-    ### SAVING AND LOADING MODEL ###
+    ### SAVING AND LOADING MODEL AND BUFFER ###
+    def save_state(self):
+        pass
+
+
     def save_model(self):
         name = f"{self.online_net.__class__.__name__}_{self.online_net.hidden_units}_V_{len(os.listdir(MODEL_DIR))}"
         torch.save(self.online_net, fr"{MODEL_DIR}\{name}.pth")
@@ -210,11 +251,20 @@ class Agent:
         model_name = fr"{base_path}\{model_name}.pth"
         try:
             model = torch.load(model_name, weights_only=False)
-            print(f"model {model_name}.pth was loaded")
+            print(f"model {model_name} was loaded")
             return model
         except FileNotFoundError:
             print(f"{model_name} was not found!")
             raise FileNotFoundError
+
+    @staticmethod
+    def load_buffer(model_version: int):
+        path = BUFFER_DIR / f"_V_{model_version}_buffer.pkl"
+        with open(path, "rb") as f:
+             x = dill.load(f)
+        print("loaded buffer")
+        return x
+
 
 
 def debug_model_shape():
@@ -239,7 +289,7 @@ def messure_env_time():
 
 
 if __name__ == '__main__':
-    agent = Agent(EPSILON, GAMMA, EPSILON_DECAY, EPSILON_MIN, USE_EXISTING_MODEL, MODEL_NAME)
+    agent = Agent(EPSILON, GAMMA, EPSILON_DECAY, EPSILON_MIN, USE_EXISTING_MODEL, MODEL_NAME, MODEL_VERSION)
     if TRAINING:
         agent.train(EPISODES)
     agent.test(TEST_EPISODES)

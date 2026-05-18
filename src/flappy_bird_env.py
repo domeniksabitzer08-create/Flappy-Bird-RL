@@ -68,7 +68,7 @@ class FlappyBirdEnv:
         # Reward-Design
         self.death_reward = -10
         self.score_reward = 10
-        self.nothing_reward = 0.1
+        self.nothing_reward = 0
         self.reward = 0
         # Rendering
         self.player_render_color = (255,165,0)
