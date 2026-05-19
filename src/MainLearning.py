@@ -1,7 +1,7 @@
 # Environment
 import copy
 from collections import deque, namedtuple
-
+from gzip import WRITE
 
 import numpy as np
 
@@ -23,29 +23,32 @@ def naming():
             retrain = "RETRAINED"
 ### ---------------- SETUP ---------------- ###
 # -> TRAINING/TESTING SETTINGS
-USE_EXISTING_MODEL = True
-MODEL_VERSION = 0
+USE_EXISTING_MODEL = False
+MODEL_VERSION = 1
+MODEL_TAG = "full"
 MODEL_NAME = f"DQN_64_V_{MODEL_VERSION}"
 TRAINING = True
 # -> HYPERPARAMETER
 LR = 0.001
 GAMMA = 0.99
-EPSILON = 0.01
+EPSILON = 1
 EPSILON_MIN = 0.01
 EPSILON_DECAY = 0.99907
-EPISODES = 10
+EPISODES = 10000
 TEST_EPISODES = 110
 DIFFICULTY = 25
 ### -------- PATH SETTINGS -------- ###
 BASE_DIR = Path(__file__).resolve().parent.parent / "Experiments"
+RUN_DIR = Path(__file__).resolve().parent.parent / "runs"
 # -> NAMING
 if not USE_EXISTING_MODEL:
     MODEL_VERSION = len(os.listdir(BASE_DIR))
 # -> Create new folder for run
 EXP_DIR = BASE_DIR / f"V_{MODEL_VERSION}"
-
 os.makedirs(EXP_DIR, exist_ok=True)
-
+### -------- TENSORBOARD -------- ###
+RUN_PATH = RUN_DIR / f"run_V_{MODEL_VERSION}"
+WRITER = SummaryWriter(str(RUN_PATH))
 
 class DQN(nn.Module):
     def __init__(self, input_features: int, output_features: int, hidden_units: int = 64):
@@ -93,23 +96,25 @@ class Agent:
     def __init__(self, epsilon, gamma, epsilon_decay, epsilon_min, use_existing_model=False, model_name=None, model_version=None):
         # networks and buffer - use existing or create new
         self.buffer = ReplayBuffer(10000, 32)
-        #online_net = self.load_model(model_name)
-        #self.buffer.memory = self.load_buffer(model_version=model_version)
-        online_net = DQN(input_features=10, output_features=2)
-        self.online_net = online_net
-        self.target_net = copy.deepcopy(self.online_net)
+        self.online_net = online_net = DQN(input_features=10, output_features=2)
         self.network_sync_rate = 1000
         # optimizer and loss function
         self.optimizer = torch.optim.Adam(self.online_net.parameters(), lr=LR)
         self.loss_fn = torch.nn.MSELoss()
+        # Tensorboard
+        self.global_steps = 0
         # Load values and states if needed
         if USE_EXISTING_MODEL:
-            checkpoint = load_checkpoint()
-            print(f"checkpoint: {checkpoint} ")
+            checkpoint = load_checkpoint(tag=MODEL_TAG)
             # model
-            #self.online_net.load_state_dict()
+            self.online_net.load_state_dict(checkpoint["model_state"])
             # optimizer
-            #self.optimizer.load_state_dict(online_net.optimizer.state_dict())
+            self.optimizer.load_state_dict(checkpoint["optimizer_state"])
+            # buffer
+            self.buffer.memory = checkpoint["buffer_memory"]
+            # global steps
+            self.global_steps = checkpoint["global_steps"]
+        self.target_net = copy.deepcopy(self.online_net)
         # Hyperparameter
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
@@ -123,7 +128,6 @@ class Agent:
         self.train_reward = 0
         self.train_steps = 0
         self.highest_score = 0
-        self.global_steps = 0
 
     def choose_action(self, state):
         if np.random.random() <= self.epsilon:
@@ -181,10 +185,10 @@ class Agent:
                     self.optimizer.step()
                     ### UPDATE DATA ###
                     episode_reward += reward
-
                     # sync networks
                     if step_count % self.network_sync_rate == 0:
                         self.sync_target()
+
 
             # Epsilon decay
             self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
@@ -204,6 +208,12 @@ class Agent:
                 avg_steps = step_count / 1
                 avg_sprint_score = 0
 
+            # Give data to Tensorboard
+            WRITER.add_scalar("reward", episode_reward, episode)
+            WRITER.add_scalar("score", episode_score, episode)
+            WRITER.add_scalar("epsilon", self.epsilon, episode)
+            WRITER.add_scalar("average score", avg_score, episode)
+            WRITER.add_scalar("average sprint score", avg_sprint_score, episode)
 
             # Print out every 1000 episode
             if episode % 100 == 0 and episode != 0:
@@ -212,10 +222,11 @@ class Agent:
                 # save the model if it is the best performing one
                 if self.highest_score < avg_sprint_score:
                     self.highest_score = avg_sprint_score
+                    save_state(self.online_net, self.optimizer, self.buffer, self.global_steps, "_best_reward")
 
         print("Training Complete!")
-        save_state(self.online_net, self.optimizer, self.buffer, self.global_steps)
-
+        save_state(self.online_net, self.optimizer, self.buffer, self.global_steps, MODEL_TAG)
+        WRITER.close()
     def test(self, episodes: int):
         total_score = 0
         env = self.env
@@ -234,7 +245,7 @@ class Agent:
             total_score += episode_score
 
 ### SAVING AND LOADING MODEL AND BUFFER ###
-def save_state(model: torch.nn.Module, optimizer: torch.optim.Optimizer, buffer: ReplayBuffer, global_steps: int):
+def save_state(model: torch.nn.Module, optimizer: torch.optim.Optimizer, buffer: ReplayBuffer, global_steps: int, tag: str = ""):
     checkpoint ={
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
@@ -242,11 +253,10 @@ def save_state(model: torch.nn.Module, optimizer: torch.optim.Optimizer, buffer:
         "global_steps": global_steps
     }
     torch.save(checkpoint, EXP_DIR/f"V_{MODEL_VERSION}.pt")
-    print(f"saved checkpoint: at location: {EXP_DIR/f"V_{MODEL_VERSION}.pt"}")
+    print(f"saved checkpoint: at location: {EXP_DIR/f"V_{MODEL_VERSION}{tag}.pt"}")
 
-
-def load_checkpoint():
-    path = EXP_DIR / f"V_{MODEL_VERSION}.pt"
+def load_checkpoint(tag: str = ""):
+    path = EXP_DIR / f"V_{MODEL_VERSION}{tag}.pt"
     checkpoint = torch.load(path, weights_only=False)
     print("loaded checkpoint!")
     return checkpoint
